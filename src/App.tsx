@@ -1,6 +1,6 @@
 import './App.css';
 import { Vector3 } from 'three'
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface Point {
   x: number;
@@ -107,46 +107,54 @@ interface Route {
   children?: Route[];
 }
 
-const findPath = (obstacles: Polygon[], orig: Point, dest: Point, candidates: Point[] = [], current: Route = {}) => {
+const findPath = (obstacles: Polygon[], orig: Point, dest: Point, candidates: Point[] = [], current: Route = {}, depth: number = 0) => {
   current.point = orig;
-  for (let i = 0; i < obstacles.length; i++) {
-    {
-      const directSeg = { start: orig, end: dest };
-      const intersection = intersectSegmentPolygon(directSeg, obstacles[i]);
-      if ((intersection.length === 1 && intersection[0].x === orig.x && intersection[0].y === orig.y) || intersection.length === 0) {
-        current.children = [{ point: dest }]
-        return;
-      }
-    }
-    const concaves = findConvex(obstacles[i]).flatMap(pt => [
-      { x: pt.x - 1, y: pt.y - 1 },
-      { x: pt.x - 1, y: pt.y },
-      { x: pt.x - 1, y: pt.y + 1 },
-      { x: pt.x, y: pt.y - 1 },
-      { x: pt.x, y: pt.y + 1 },
-      { x: pt.x + 1, y: pt.y - 1 },
-      { x: pt.x + 1, y: pt.y },
-      { x: pt.x + 1, y: pt.y + 1 },
-    ]);
-    const directApexes = concaves.filter(c => !(c.x === orig.x && c.y === orig.y)).filter(c => {
-      const seg = { start: orig, end: c };
-      for (let j = 0; j < obstacles.length; j++) {
-        const intersections = intersectSegmentPolygon(seg, obstacles[j]);
-        if (intersections.length === 0) {
-          continue;
-        }
-        return false;
-      }
-      return true;
-    });
-
-    const validateApexes = directApexes.filter(a => candidates.filter(c => c.x === a.x && c.y === a.y).length === 0);
-    current.children = Array.from(Array(validateApexes.length));
-    for (let i = 0; i < current.children.length; i++) {
-      current.children[i] = {}
-    }
-    validateApexes.map((a, idx) => findPath(obstacles, a, dest, [...directApexes, ...candidates], current.children![idx]));
+  let concaves: Point[] = [];
+  const directToEnd = obstacles.map(ob => {
+    const directSeg = { start: orig, end: dest };
+    const intersection = intersectSegmentPolygon(directSeg, ob);
+    return ((intersection.length === 1 && intersection[0].x === orig.x && intersection[0].y === orig.y) || intersection.length === 0);
+  }).reduce((a, b) => a && b);
+  if (directToEnd) {
+    current.children = [{ point: dest }]
+    return;
   }
+  for (let i = 0; i < obstacles.length; i++) {
+    let myConcaves = findConvex(obstacles[i])
+      .flatMap(pt => [
+        { x: pt.x - 1, y: pt.y - 1 },
+        { x: pt.x - 1, y: pt.y },
+        { x: pt.x - 1, y: pt.y + 1 },
+        { x: pt.x, y: pt.y - 1 },
+        { x: pt.x, y: pt.y + 1 },
+        { x: pt.x + 1, y: pt.y - 1 },
+        { x: pt.x + 1, y: pt.y },
+        { x: pt.x + 1, y: pt.y + 1 },
+      ])
+      .filter(pt => pt.x >= 0 && pt.y >= 0)
+      .filter(c => !(c.x === orig.x && c.y === orig.y));
+
+    concaves = [...concaves, ...myConcaves]
+  }
+  const directApexes = concaves.filter(c => {
+    const seg = { start: orig, end: c };
+    for (let j = 0; j < obstacles.length; j++) {
+      const intersections = intersectSegmentPolygon(seg, obstacles[j]);
+      if (intersections.length === 0) {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  });
+
+  const validateApexes = directApexes.filter(a => candidates.filter(c => c.x === a.x && c.y === a.y).length === 0);
+  current.children = Array.from(Array(validateApexes.length));
+  for (let i = 0; i < current.children.length; i++) {
+    current.children[i] = {}
+  }
+  validateApexes.map((a, idx) => findPath(obstacles, a, dest, [...directApexes, ...candidates], current.children![idx], depth + 1));
+
 }
 
 const extractRoutes = (route: Route, out: Point[][] = [], cur: Point[] = []) => {
@@ -180,42 +188,59 @@ const selectPath = (paths: Point[][], dst: Point): Point[] => {
   return paths.filter(p => p[p.length - 1].x === dst.x && p[p.length - 1].y === dst.y)
     .map(p => ({ distance: p.reduce((a, b, idx, arr) => a + (idx === 0 ? 0 : distance(arr[idx - 1], b)), 0), path: p }))
     .sort((a, b) => a.distance - b.distance)
-    .map(a => a.path)[0];
+    .map(a => a.path)[0] || [];
 }
 
 const App = () => {
-  const obstacles: Polygon[] = [
+  const obstacles: Polygon[] = useMemo(() => [
     [
-      { x: 9, y: 3 },
-      { x: 11, y: 5 },
-      { x: 7, y: 10 },
-      { x: 5, y: 10 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+      { x: 2, y: 15 },
+      { x: 1, y: 15 },
+    ],
+    [
+      { x: 0, y: 17 },
+      { x: 20, y: 17 },
+      { x: 20, y: 19 },
+      { x: 0, y: 19 },
+    ],
+    [
+      { x: 5, y: 0 },
+      { x: 60, y: 0 },
+      { x: 60, y: 14 },
+      { x: 5, y: 14 },
+    ],
+    [
+      { x: 24, y: 16 },
+      { x: 60, y: 16 },
+      { x: 60, y: 24 },
+      { x: 24, y: 24 },
     ]
-  ];
+  ], []);
 
-  const [start, setStart] = useState({ x: 5, y: 5 });
+  const [start, setStart] = useState({ x: 0, y: 0 });
   const [end, setEnd] = useState({ x: 20, y: 20 });
-  const [bestPath, setBestPath] = useState<Point[]>([]);
-  const [onStart, setOnStart] = useState(false);
-  const [onEnd, setOnEnd] = useState(false);
+  const onStart = useRef(false);
+  const onEnd = useRef(false);
 
-  const maxX = 100;
-  const maxY = 100;
-  const blockSize = 7;
+  const maxX = 50;
+  const maxY = 50;
+  const blockSize = 10;
 
-  useEffect(() => {
-    const route: Route = {}
-    findPath(obstacles, start, end, [], route);
-    const paths: Point[][] = [];
-    extractRoutes(route, paths);
-    setBestPath(selectPath(paths, end));
-    console.log('path: ');
-    console.log(paths);
-    console.log('bestPath: ');
-    console.log(bestPath);
-  }, [start, end]);
+  const route: Route = {}
+  findPath(obstacles, start, end, [], route);
 
-  const setPos = (e: MouseEvent, cb: (pt: Point) => void) => {
+  const paths: Point[][] = [];
+  extractRoutes(route, paths);
+  const bestPath = selectPath(paths, end);
+
+  // console.log('path: ');
+  // console.log(paths);
+  // console.log('bestPath: ');
+  // console.log(bestPath);
+
+  const getMouseDownPos = (e: MouseEvent) => {
     const ele = document.elementFromPoint(e.clientX, e.clientY);
     if (!ele) {
       return;
@@ -231,45 +256,50 @@ const App = () => {
     }
     const x = Array.from(ele.parentElement.children).indexOf(ele);
     const y = Array.from(ele.parentElement.parentElement.children).indexOf(ele.parentElement);
-    cb({ x, y });
+    return { x, y };
   }
 
-  const setStartPos = (e: MouseEvent) => {
-    setPos(e, setStart);
+  const setPos = (e: MouseEvent) => {
+    const pos = getMouseDownPos(e);
+    if (!pos) {
+      return;
+    }
+    if (onStart.current) {
+      setStart(pos);
+    }
+    else if (onEnd.current) {
+      setEnd(pos);
+    }
   }
-  
-  const setEndPos = (e: MouseEvent) => {
-    setPos(e, setEnd);
+  const captureCurrent = (e: MouseEvent) => {
+    const pos = getMouseDownPos(e);
+    if (!pos) {
+      return;
+    }
+    if (!onStart.current && isStart(pos.x, pos.y)) {
+      onStart.current = true;
+      return;
+    }
+    else if (!onEnd.current && isEnd(pos.x, pos.y)) {
+      onEnd.current = true;
+      return;
+    }
   }
-
   const releaseCurrent = () => {
-    setOnStart(false);
-    setOnEnd(false);
+    onStart.current = false;
+    onEnd.current = false;
   }
 
   useEffect(() => {
-    if (onStart) {
-      document.addEventListener('mousemove', setStartPos);
-      document.addEventListener('mouseup', releaseCurrent);
-    }
-    else {
-      document.removeEventListener('mousemove', setStartPos);
-      document.removeEventListener('mouseup', releaseCurrent);
-    }
-    if (onEnd) {
-      document.addEventListener('mousemove', setEndPos);
-      document.addEventListener('mouseup', releaseCurrent);
-    }
-    else {
-      document.removeEventListener('mousemove', setEndPos);
-      document.removeEventListener('mouseup', releaseCurrent);
-    }
+    document.addEventListener('mousedown', captureCurrent);
+    document.addEventListener('mousemove', setPos);
+    document.addEventListener('mouseup', releaseCurrent);
     return () => {
-      document.removeEventListener('mousemove', setStartPos);
-      document.removeEventListener('mousemove', setEndPos);
+      document.removeEventListener('mousedown', captureCurrent);
+      document.removeEventListener('mousemove', setPos);
       document.removeEventListener('mouseup', releaseCurrent);
     }
-  }, [onStart])
+  })
 
   const isApex = (x: number, y: number) => {
 
@@ -347,11 +377,6 @@ const App = () => {
     return 'transparent'
   }
 
-  const handleStartDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    setOnStart(true);
-  }
-
-
   return (
     <div className="App">
       {
@@ -359,7 +384,6 @@ const App = () => {
           <div key={`${y}-row`} className='block-item-row'>
             {Array.from(Array(maxX)).map((_, x) =>
               <div
-                onMouseDown={isStart(x, y) ? handleStartDown : undefined}
                 className='block-item'
                 key={`${x}-${y}`}
                 style={{
