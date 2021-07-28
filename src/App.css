@@ -1,4 +1,6 @@
 .App {
+  position: relative;
+  margin: 10px;
   text-align: center;
 }
 
@@ -35,4 +37,21 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.block-item {
+  box-sizing: content-box;
+  border-top-width: 1px;
+  border-left-width: 1px;
+  border-style: solid;
+  border-color: lightgrey;
+  border-bottom: none;
+  border-right: none;
+}
+.block-item:last-child {
+  border-right: 1px solid lightgrey;
+}
+
+.block-item-row:last-child .block-item {
+  border-bottom: 1px solid lightgrey;
 }
